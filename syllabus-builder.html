@@ -20324,7 +20324,7 @@ window._docxReady = true;
   <div id="workspace" class="flex-1 flex overflow-hidden" style="display:none">
 
     <!-- SIDEBAR -->
-    <aside id="sidebar" class="w-72 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-x-hidden">
+    <aside id="sidebar" class="w-72 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden">
 
       <!-- Semester Nav -->
       <div class="p-4 border-b border-slate-100">
@@ -21152,14 +21152,36 @@ function importJSON(evt) {
       if (data.appConfig) appConfig = data.appConfig;
       if (data.editData) editData = data.editData;
       if (data.logoBase64) { logoBase64 = data.logoBase64; logoMime = data.logoMime || 'image/png'; }
+      // Populate form fields from imported appConfig so initializeProgram reads correct values
+      document.getElementById('s_collegeName').value = appConfig.collegeName || '';
+      document.getElementById('s_affiliation').value = appConfig.affiliation || '';
+      document.getElementById('s_recognition').value = appConfig.recognition || '';
+      document.getElementById('s_address').value = appConfig.address || '';
+      document.getElementById('s_principalName').value = appConfig.principalName || '';
+      document.getElementById('s_hodName').value = appConfig.hodName || '';
+      document.getElementById('s_degree').value = appConfig.degree || '';
+      document.getElementById('s_branch').value = appConfig.branch || '';
+      document.getElementById('s_specialization').value = appConfig.specialization || '';
+      document.getElementById('s_batch').value = appConfig.batch || '';
+      document.getElementById('s_approvedBy').value = appConfig.approvedBy || '';
+      document.getElementById('s_totalSems').value = appConfig.totalSems || 8;
+      document.getElementById('s_semsPerYear').value = appConfig.semsPerYear || 2;
+      document.getElementById('s_duration').value = appConfig.duration || 4;
+      // Restore logo preview
+      if (logoBase64) {
+        document.getElementById('setupLogoPreview').innerHTML = `<img src="data:${logoMime};base64,${logoBase64}" class="max-w-full max-h-full object-contain" alt="Logo">`;
+      }
       initializeProgram();
+      setStatus('Imported successfully!', 'ok');
     } catch(err) { alert('Invalid JSON file: ' + err.message); }
   };
   reader.readAsText(file);
+  // Reset the input so the same file can be re-imported
+  evt.target.value = '';
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DOCX DOWNLOAD
+// DOCX DOWNLOAD — mirrors preview structure EXACTLY
 // ═══════════════════════════════════════════════════════════════
 async function downloadDocx() {
   const btn = document.getElementById('downloadBtn');
@@ -21169,232 +21191,545 @@ async function downloadDocx() {
   try {
     if (typeof window.docx === 'undefined') throw new Error('docx library not loaded.');
 
-    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, Footer, PageNumber, ShadingType, ImageRun, VerticalAlign } = window.docx;
-    const FONT = 'Cambria';
-    const PAGE_W=12240, PAGE_H=15840;
-    const MARGIN_TOP=1000, MARGIN_RIGHT=360, MARGIN_BOTTOM=280, MARGIN_LEFT=360;
+    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+            WidthType, AlignmentType, BorderStyle, Footer, PageNumber,
+            ShadingType, ImageRun, VerticalAlign, TabStopType, TabStopPosition } = window.docx;
+
+    // ── Formatting constants matching reference DOCX exactly ──
+    const FONT = 'Inter';
+    // A4 page (reference: 7560310 EMU width = 11906 DXA, 10692130 EMU height = 16838 DXA)
+    const PAGE_W = 11906, PAGE_H = 16838;
+    // Margins (reference: top=635000EMU→1000DXA, bottom=485775EMU→765DXA, L/R=228600EMU→360DXA)
+    const MARGIN_TOP = 1000, MARGIN_RIGHT = 360, MARGIN_BOTTOM = 765, MARGIN_LEFT = 360;
     const CONTENT_W = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT;
 
-    function solid(size){return{style:BorderStyle.SINGLE,size,color:'000000'}}
-    function allBorders(size=4){return{top:solid(size),bottom:solid(size),left:solid(size),right:solid(size)}}
-    function noBorders(){const n={style:BorderStyle.NONE,size:0,color:'FFFFFF'};return{top:n,bottom:n,left:n,right:n}}
-    function noShading(){return{type:ShadingType.CLEAR,fill:'FFFFFF',color:'auto'}}
-    function wcols(weights,total=CONTENT_W){const sum=weights.reduce((a,b)=>a+b,0);const out=weights.map(w=>Math.floor(w/sum*total));out[out.length-1]+=total-out.reduce((a,b)=>a+b,0);return out}
+    // ── Font sizes in half-points (matching reference DOCX exactly) ──
+    const SZ_COVER_TITLE  = 30;  // 15pt — cover page main titles
+    const SZ_COVER_APPROVED = 23; // 11.5pt — "(Approved by ...)"
+    const SZ_HEADING1     = 28;  // 14pt — section headings (Curriculum Structure, etc.)
+    const SZ_HEADING_SUB  = 24;  // 12pt — sub-headings
+    const SZ_COLLEGE_NAME = 24;  // 12pt — college name on cover
+    const SZ_COVER_SUB    = 22;  // 11pt — affiliation, address on cover
+    const SZ_BODY         = 22;  // 11pt — body text (POs, book lists)
+    const SZ_TABLE        = 20;  // 10pt — general table cells
+    const SZ_CURR_TABLE   = 22;  // 11pt — curriculum table cells
+    const SZ_FOOTER       = 18;  // 9pt — footer
+    const SZ_SUBJECT_TITLE = 24; // 12pt — subject name bold center
 
-    function para(text,opts={}){
-      const runs=Array.isArray(text)?text:[new TextRun({text:String(text||''),bold:opts.bold||false,italics:opts.italics||false,size:opts.size||24,font:FONT})];
-      return new Paragraph({children:runs,alignment:opts.center?AlignmentType.CENTER:(opts.right?AlignmentType.RIGHT:AlignmentType.LEFT),spacing:{before:opts.spaceBefore||0,after:opts.spaceAfter||80},pageBreakBefore:opts.pageBreakBefore||false});
-    }
-    function heading1(text,opts={}){return new Paragraph({children:[new TextRun({text,bold:true,size:28,font:FONT,underline:opts.underline?{}:undefined})],alignment:opts.left?AlignmentType.LEFT:AlignmentType.CENTER,spacing:{before:160,after:100},pageBreakBefore:opts.pageBreakBefore||false})}
-    function heading1Sub(text){return new Paragraph({children:[new TextRun({text,bold:true,size:24,font:FONT})],alignment:AlignmentType.CENTER,spacing:{after:40}})}
-    function heading2Center(text){return new Paragraph({children:[new TextRun({text,bold:true,size:24,font:FONT})],alignment:AlignmentType.CENTER,spacing:{before:120,after:60}})}
-    function spacer(){return new Paragraph({children:[],spacing:{after:100}})}
-
-    function cell(text,opts={}){
-      return new TableCell({children:[new Paragraph({children:[new TextRun({text:String(text===0?0:(text||'')),bold:opts.bold||false,size:opts.size||20,font:FONT})],alignment:opts.center?AlignmentType.CENTER:AlignmentType.LEFT,spacing:{before:30,after:30}})],
-        columnSpan:opts.colSpan||undefined,width:opts.width?{size:opts.width,type:WidthType.DXA}:undefined,shading:noShading(),verticalAlign:VerticalAlign.CENTER,margins:{top:40,bottom:40,left:80,right:80},borders:opts.noBorders?noBorders():undefined});
-    }
-    function headerCell(text,opts={}){
-      return new TableCell({children:[new Paragraph({children:[new TextRun({text:String(text||''),bold:true,size:opts.size||20,font:FONT})],alignment:opts.center!==false?AlignmentType.CENTER:AlignmentType.LEFT,spacing:{before:30,after:30}})],
-        columnSpan:opts.colSpan||undefined,width:opts.width?{size:opts.width,type:WidthType.DXA}:undefined,shading:noShading(),verticalAlign:VerticalAlign.CENTER,margins:{top:40,bottom:40,left:80,right:80}});
-    }
-    function gridTable(cols,rows){return new Table({rows,width:{size:CONTENT_W,type:WidthType.DXA},borders:allBorders(4)})}
-
-    // Cover page
-    function coverPageChildren(){
-      const children = [];
-      const progLabel = getProgramLabel();
-      children.push(para(`Syllabus for\n${progLabel}\n${appConfig.batch||''}`, {center:true, bold:true, size:30, spaceBefore:200, spaceAfter:100}));
-      children.push(para(`${appConfig.branch||''}${appConfig.specialization?'\n'+appConfig.specialization:''}`, {center:true, bold:true, size:30, spaceAfter:60}));
-      if (appConfig.approvedBy) children.push(para(`(Approved by ${appConfig.approvedBy})`, {center:true, bold:true, size:23, spaceAfter:100}));
-
-      if (logoBase64) {
-        try {
-          const imgBytes = Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0));
-          children.push(new Paragraph({children:[new ImageRun({data:imgBytes,transformation:{width:170,height:170},type:logoMime.includes('png')?'png':'jpg'})],alignment:AlignmentType.CENTER,spacing:{before:100,after:100}}));
-        } catch(e) { children.push(para('[Logo]',{center:true})); }
-      }
-
-      children.push(para(appConfig.collegeName, {center:true, bold:true, size:24, spaceAfter:20}));
-      if (appConfig.affiliation) children.push(para(appConfig.affiliation, {center:true, size:22, spaceAfter:10}));
-      if (appConfig.recognition) children.push(para(appConfig.recognition, {center:true, size:22, spaceAfter:10}));
-      if (appConfig.address) children.push(para(appConfig.address, {center:true, size:22, spaceAfter:40}));
-      if (appConfig.principalName) children.push(para('Principal: '+appConfig.principalName, {center:true, size:22, spaceAfter:10}));
-      if (appConfig.hodName) children.push(para('HOD: '+appConfig.hodName, {center:true, size:22, spaceAfter:10}));
-      return children;
-    }
-
-    // Curriculum
-    function semCurriculumChildren(sem){
-      const out = [];
-      const cols = wcols([8,10,16,38,12,8]);
-      const hRow = new TableRow({children:[headerCell('Sl.',{width:cols[0]}),headerCell('Cat',{width:cols[1]}),headerCell('Code',{width:cols[2]}),headerCell('Title',{width:cols[3]}),headerCell('L-T-P',{width:cols[4]}),headerCell('Cr',{width:cols[5]})]});
-      const rows = [hRow];
-      sem.theory.forEach((s,i) => rows.push(new TableRow({children:[cell(s.slNo||i+1,{width:cols[0],center:true}),cell(s.category,{width:cols[1],center:true}),cell(s.code,{width:cols[2]}),cell(s.title,{width:cols[3]}),cell(s.ltp,{width:cols[4],center:true}),cell(s.credits,{width:cols[5],center:true})]})));
-      rows.push(new TableRow({children:[cell('Total Theory Credits: '+sem.theoryCredits,{width:cols[0]+cols[1]+cols[2]+cols[3],colSpan:4,bold:true}),cell('',{width:cols[4]}),cell('',{width:cols[5]})]}));
-      out.push(gridTable(cols,rows));
-
-      if (sem.practical.length) {
-        out.push(spacer());
-        const prows = [new TableRow({children:[headerCell('Practical',{width:CONTENT_W,colSpan:6,center:false})]})];
-        sem.practical.forEach((s,i) => prows.push(new TableRow({children:[cell(s.slNo||i+1,{width:cols[0],center:true}),cell(s.category,{width:cols[1],center:true}),cell(s.code,{width:cols[2]}),cell(s.title,{width:cols[3]}),cell(s.ltp,{width:cols[4],center:true}),cell(s.credits,{width:cols[5],center:true})]})));
-        prows.push(new TableRow({children:[cell('Total Practical Credits: '+sem.practicalCredits,{width:cols[0]+cols[1]+cols[2]+cols[3],colSpan:4,bold:true}),cell('',{width:cols[4]}),cell('',{width:cols[5]})]}));
-        prows.push(new TableRow({children:[cell('Total Semester Credits: '+sem.totalCredits,{width:cols[0]+cols[1]+cols[2]+cols[3],colSpan:4,bold:true}),cell('',{width:cols[4]}),cell('',{width:cols[5]})]}));
-        out.push(gridTable(cols,prows));
-      }
-      if (sem.note) out.push(para(sem.note,{center:true,bold:true,spaceBefore:60}));
+    // ── Border/shading helpers ──
+    function solid(size) { return { style: BorderStyle.SINGLE, size, color: '000000' }; }
+    function allBorders(size=4) { return { top:solid(size), bottom:solid(size), left:solid(size), right:solid(size) }; }
+    function noShading() { return { type: ShadingType.CLEAR, fill: 'FFFFFF', color: 'auto' }; }
+    function wcols(weights, total=CONTENT_W) {
+      const sum = weights.reduce((a,b)=>a+b,0);
+      const out = weights.map(w => Math.floor(w/sum*total));
+      out[out.length-1] += total - out.reduce((a,b)=>a+b,0);
       return out;
     }
 
-    // PO page
-    function programOutcomesChildren(){
-      const out = [heading1('Program Outcomes',{pageBreakBefore:true,underline:true})];
+    // ── Paragraph helpers ──
+    function para(text, opts={}) {
+      const sz = opts.size || SZ_BODY;
+      const runs = Array.isArray(text) ? text : [new TextRun({ text: String(text||''), bold: opts.bold||false, italics: opts.italics||false, size: sz, font: FONT })];
+      return new Paragraph({
+        children: runs,
+        alignment: opts.center ? AlignmentType.CENTER : (opts.right ? AlignmentType.RIGHT : AlignmentType.LEFT),
+        spacing: { before: opts.spaceBefore||0, after: opts.spaceAfter||80 },
+        pageBreakBefore: opts.pageBreakBefore||false
+      });
+    }
+
+    function heading1(text, opts={}) {
+      return new Paragraph({
+        children: [new TextRun({ text, bold: true, size: SZ_HEADING1, font: FONT, underline: opts.underline ? {} : undefined })],
+        alignment: opts.left ? AlignmentType.LEFT : AlignmentType.CENTER,
+        spacing: { before: 160, after: 100 },
+        pageBreakBefore: opts.pageBreakBefore||false
+      });
+    }
+
+    function heading1Sub(text) {
+      return new Paragraph({ children: [new TextRun({ text, bold: true, size: SZ_HEADING_SUB, font: FONT })], alignment: AlignmentType.CENTER, spacing: { after: 40 } });
+    }
+
+    function heading2Center(text) {
+      return new Paragraph({ children: [new TextRun({ text, bold: true, size: SZ_HEADING_SUB, font: FONT })], alignment: AlignmentType.CENTER, spacing: { before: 120, after: 60 } });
+    }
+
+    function spacer() { return new Paragraph({ children: [], spacing: { after: 100 } }); }
+
+    // ── Table cell helpers ──
+    function cell(text, opts={}) {
+      const sz = opts.size || SZ_TABLE;
+      return new TableCell({
+        children: [new Paragraph({
+          children: [new TextRun({ text: String(text===0?0:(text||'')), bold: opts.bold||false, size: sz, font: FONT })],
+          alignment: opts.center ? AlignmentType.CENTER : AlignmentType.LEFT,
+          spacing: { before: 30, after: 30 }
+        })],
+        columnSpan: opts.colSpan||undefined,
+        width: opts.width ? { size: opts.width, type: WidthType.DXA } : undefined,
+        shading: noShading(),
+        verticalAlign: VerticalAlign.CENTER,
+        margins: { top: 40, bottom: 40, left: 80, right: 80 },
+      });
+    }
+
+    function headerCell(text, opts={}) {
+      const sz = opts.size || SZ_TABLE;
+      return new TableCell({
+        children: [new Paragraph({
+          children: [new TextRun({ text: String(text||''), bold: true, size: sz, font: FONT })],
+          alignment: opts.center !== false ? AlignmentType.CENTER : AlignmentType.LEFT,
+          spacing: { before: 30, after: 30 }
+        })],
+        columnSpan: opts.colSpan||undefined,
+        width: opts.width ? { size: opts.width, type: WidthType.DXA } : undefined,
+        shading: noShading(),
+        verticalAlign: VerticalAlign.CENTER,
+        margins: { top: 40, bottom: 40, left: 80, right: 80 }
+      });
+    }
+
+    function gridTable(cols, rows) {
+      return new Table({ rows, width: { size: CONTENT_W, type: WidthType.DXA }, borders: allBorders(4) });
+    }
+
+    const progLabel = getProgramLabel();
+    const incCover = document.getElementById('incCover').checked;
+    const incPO = document.getElementById('incPO').checked;
+    const incCurriculum = document.getElementById('incCurriculum').checked;
+    const incEvaluation = document.getElementById('incEvaluation').checked;
+    const incTheory = document.getElementById('incTheory').checked;
+    const incPractical = document.getElementById('incPractical').checked;
+
+    // ════════════════════════════════════════════════════════════════
+    // COVER PAGE (matches reference: Inter 15pt bold, centered)
+    // ════════════════════════════════════════════════════════════════
+    function coverPageChildren() {
+      const ch = [];
+      ch.push(para('Syllabus for', { center:true, bold:true, size:SZ_COVER_TITLE, spaceAfter:80 }));
+      ch.push(para(progLabel, { center:true, bold:true, size:SZ_COVER_TITLE, spaceAfter:0 }));
+      if (appConfig.batch) ch.push(para(appConfig.batch, { center:true, bold:true, size:SZ_COVER_TITLE, spaceAfter:200 }));
+      if (appConfig.branch) ch.push(para(appConfig.branch + (appConfig.specialization ? '\n'+appConfig.specialization : ''), { center:true, bold:true, size:SZ_COVER_TITLE, spaceAfter:80 }));
+      if (appConfig.approvedBy) ch.push(para('(Approved by '+appConfig.approvedBy+')', { center:true, bold:true, size:SZ_COVER_APPROVED, spaceAfter:300 }));
+
+      // Logo
+      if (logoBase64) {
+        try {
+          const imgBytes = Uint8Array.from(atob(logoBase64), c => c.charCodeAt(0));
+          ch.push(new Paragraph({ children:[new ImageRun({data:imgBytes,transformation:{width:170,height:170},type:logoMime.includes('png')?'png':'jpg'})], alignment:AlignmentType.CENTER, spacing:{before:60,after:60} }));
+        } catch(e) {}
+      }
+
+      ch.push(para(appConfig.collegeName, { center:true, bold:true, size:SZ_COLLEGE_NAME, spaceBefore:300, spaceAfter:60 }));
+      if (appConfig.affiliation) ch.push(para(appConfig.affiliation, { center:true, size:SZ_COVER_SUB, spaceAfter:20 }));
+      if (appConfig.recognition) ch.push(para(appConfig.recognition, { center:true, size:SZ_COVER_SUB, spaceAfter:60 }));
+      if (appConfig.address) ch.push(para(appConfig.address, { center:true, size:SZ_COVER_SUB, spaceAfter:20 }));
+      if (appConfig.principalName) ch.push(para('Principal: '+appConfig.principalName, { center:true, size:SZ_COVER_SUB, spaceBefore:60, spaceAfter:10 }));
+      if (appConfig.hodName) ch.push(para('HOD: '+appConfig.hodName, { center:true, size:SZ_COVER_SUB, spaceAfter:10 }));
+      return ch;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // CURRICULUM — two-column layout (reference uses 1×2 table per year)
+    // ════════════════════════════════════════════════════════════════
+    function buildCurriculumInnerParagraphs(sem) {
+      // Build paragraphs for one semester column
+      const paras = [];
+      paras.push(new Paragraph({ children:[new TextRun({text:sem.label.toUpperCase(),bold:true,size:SZ_CURR_TABLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{after:40} }));
+
+      // Header row
+      const hdr = new Paragraph({ children:[
+        new TextRun({text:'Sl. No.',bold:true,size:SZ_TABLE,font:FONT}),
+      ], spacing:{after:20} });
+
+      // Build a sub-table inside the cell for the curriculum
+      const cols = wcols([7,9,15,39,12,8], Math.floor(CONTENT_W/2) - 160);
+      const rows = [];
+      rows.push(new TableRow({children:[
+        headerCell('Sl.\nNo.',{width:cols[0],size:SZ_TABLE}), headerCell('Category',{width:cols[1],size:SZ_TABLE}),
+        headerCell('Course Code',{width:cols[2],size:SZ_TABLE}), headerCell('Course Title',{width:cols[3],size:SZ_TABLE,center:false}),
+        headerCell('L-T-P',{width:cols[4],size:SZ_TABLE}), headerCell('Credit',{width:cols[5],size:SZ_TABLE})
+      ]}));
+      sem.theory.forEach((s,i) => rows.push(new TableRow({children:[
+        cell(s.slNo||i+1,{width:cols[0],center:true,size:SZ_TABLE}), cell(s.category,{width:cols[1],center:true,size:SZ_TABLE}),
+        cell(s.code,{width:cols[2],size:SZ_TABLE}), cell(s.title,{width:cols[3],size:SZ_TABLE}),
+        cell(s.ltp,{width:cols[4],center:true,size:SZ_TABLE}), cell(s.credits,{width:cols[5],center:true,size:SZ_TABLE})
+      ]})));
+      rows.push(new TableRow({children:[
+        cell('Total Credit (Theory)',{width:cols[0]+cols[1]+cols[2]+cols[3]+cols[4],colSpan:5,bold:true,size:SZ_TABLE}),
+        cell(sem.theoryCredits,{width:cols[5],center:true,bold:true,size:SZ_TABLE})
+      ]}));
+
+      if (sem.practical.length) {
+        rows.push(new TableRow({children:[headerCell('Practical',{width:cols[0]+cols[1]+cols[2]+cols[3]+cols[4]+cols[5],colSpan:6,center:false,size:SZ_TABLE})]}));
+        sem.practical.forEach((s,i) => rows.push(new TableRow({children:[
+          cell(s.slNo||i+1,{width:cols[0],center:true,size:SZ_TABLE}), cell(s.category,{width:cols[1],center:true,size:SZ_TABLE}),
+          cell(s.code,{width:cols[2],size:SZ_TABLE}), cell(s.title,{width:cols[3],size:SZ_TABLE}),
+          cell(s.ltp,{width:cols[4],center:true,size:SZ_TABLE}), cell(s.credits,{width:cols[5],center:true,size:SZ_TABLE})
+        ]})));
+        rows.push(new TableRow({children:[
+          cell('Total Credit (Practical)',{width:cols[0]+cols[1]+cols[2]+cols[3]+cols[4],colSpan:5,bold:true,size:SZ_TABLE}),
+          cell(sem.practicalCredits,{width:cols[5],center:true,bold:true,size:SZ_TABLE})
+        ]}));
+        rows.push(new TableRow({children:[
+          cell('Total Semester Credit',{width:cols[0]+cols[1]+cols[2]+cols[3]+cols[4],colSpan:5,bold:true,size:SZ_TABLE}),
+          cell(sem.totalCredits,{width:cols[5],center:true,bold:true,size:SZ_TABLE})
+        ]}));
+      }
+
+      const halfW = Math.floor(CONTENT_W/2) - 80;
+      return new TableCell({
+        children: [
+          new Paragraph({ children:[new TextRun({text:sem.label.toUpperCase(),bold:true,size:SZ_CURR_TABLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{after:40} }),
+          new Table({ rows, width:{size:halfW,type:WidthType.DXA}, borders:allBorders(4) }),
+          ...(sem.note ? [new Paragraph({ children:[new TextRun({text:sem.note,bold:true,size:SZ_TABLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{before:60,after:40} })] : [])
+        ],
+        width: { size: Math.floor(CONTENT_W/2), type: WidthType.DXA },
+        shading: noShading(),
+        borders: allBorders(4),
+        margins: { top: 60, bottom: 60, left: 80, right: 80 }
+      });
+    }
+
+    function curriculumPages() {
+      const ch = [];
+      const semsPerYear = appConfig.semsPerYear;
+      const totalYears = appConfig.duration;
+
+      for (let yr = 1; yr <= totalYears; yr++) {
+        const firstSem = (yr-1)*semsPerYear + 1;
+        const isFirst = yr === 1 && !incCover;
+        ch.push(heading1('Curriculum Structure', { pageBreakBefore: !isFirst }));
+        ch.push(heading1Sub(appConfig.collegeName));
+        const yrLabel = (ORDINALS[yr]||yr).toUpperCase() + ' YEAR';
+        ch.push(heading1Sub(`${appConfig.degree.toUpperCase()} – ${(appConfig.branch||'').toUpperCase()}, SYLLABUS-${appConfig.batch||''}, ${yrLabel}`));
+
+        // Build side-by-side table: 2 semesters per row
+        const semCells = [];
+        for (let s = 0; s < semsPerYear; s++) {
+          const semNum = firstSem + s;
+          if (semNum > appConfig.totalSems) break;
+          const sem = editData.semesters[semNum];
+          if (!sem) continue;
+          semCells.push(buildCurriculumInnerParagraphs(sem));
+        }
+
+        if (semCells.length === 2) {
+          // Two semesters side by side
+          ch.push(new Table({
+            rows: [new TableRow({ children: semCells })],
+            width: { size: CONTENT_W, type: WidthType.DXA },
+            borders: allBorders(4)
+          }));
+        } else {
+          // Single semester or more than 2 — stack vertically
+          semCells.forEach(sc => {
+            ch.push(new Table({
+              rows: [new TableRow({ children: [sc] })],
+              width: { size: CONTENT_W, type: WidthType.DXA },
+              borders: allBorders(4)
+            }));
+            ch.push(spacer());
+          });
+        }
+      }
+      return ch;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // PROGRAM OUTCOMES (reference: left-aligned, 11pt body)
+    // ════════════════════════════════════════════════════════════════
+    function programOutcomesChildren() {
+      const out = [heading1('Program Outcomes (UG Engineering)', { pageBreakBefore:true })];
+      out.push(para('Graduates Attributes (GAs) form a set of individually assessable outcomes that are the components indicative of the graduate\'s potential to acquire competence to practice at the appropriate level. The Program Outcomes (POs) for UG Engineering programs defined by NBA are:', { size:SZ_HEADING_SUB, spaceAfter:120 }));
       editData.programOutcomes.forEach(po => {
-        out.push(para([new TextRun({text:`${po.po}. ${po.title}: `,bold:true,size:24,font:FONT}),new TextRun({text:po.desc,size:24,font:FONT})],{spaceAfter:60}));
+        out.push(para([
+          new TextRun({ text:`${po.po}. ${po.title}: `, bold:true, size:SZ_COVER_SUB, font:FONT }),
+          new TextRun({ text:po.desc, size:SZ_COVER_SUB, font:FONT })
+        ], { spaceAfter:80 }));
       });
       return out;
     }
 
-    // Eval pages
-    function evaluationChildren(){
-      const out = [heading1('Evaluation Process',{pageBreakBefore:true,left:true,underline:true})];
-      // Theory Internal
-      out.push(para('1. Theory Subjects:',{bold:true,spaceBefore:80}));
-      out.push(heading2Center('Internal Examination'));
+    // ════════════════════════════════════════════════════════════════
+    // GLOSSARY — Course Types & Definitions
+    // ════════════════════════════════════════════════════════════════
+    const CATEGORY_GLOSSARY = [
+      ['L','Lecture'], ['T','Tutorial'], ['P','Laboratory / Practical / Sessional'], ['WCH','Weekly Contact Hours'],
+      ['BS','Basic Sciences'], ['HS','Humanities & Social Sciences (including Management)'], ['ES','Engineering Sciences'],
+      ['PC','Professional Core'], ['PE','Professional Elective'], ['OE','Open Elective'], ['MC','Mandatory Course'],
+      ['SC','Skill Course'], ['EEC','Employment Enhancement Course'], ['SEPD','Skill Enhancement and Personality Development'],
+      ['AE','Ability / Employment Enhancement Course'], ['PS','Project / Seminar'], ['OO','Open Online Course (MOOC / NPTEL)'],
+      ['ED','Elective (Departmental)']
+    ];
+
+    function glossaryChildren() {
+      const out = [heading2Center('Course Types & Definitions')];
+      const cols = wcols([15, 85]);
+      const rows = CATEGORY_GLOSSARY.map(([code, desc]) => new TableRow({ children: [
+        headerCell(code, { width:cols[0], size:SZ_TABLE }),
+        cell(desc, { width:cols[1], size:SZ_TABLE })
+      ]}));
+      out.push(gridTable(cols, rows));
+      return out;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // EVALUATION (same structure as before, with correct font sizes)
+    // ════════════════════════════════════════════════════════════════
+    function evaluationChildren() {
+      const out = [heading1('Evaluation Process', { pageBreakBefore:true, left:true, underline:true })];
+
+      out.push(para('1. Evaluation Process of Theory Subjects:', { bold:true, size:SZ_BODY, spaceBefore:80 }));
+      out.push(heading2Center('Internal Examination ('+appConfig.degree+', Autonomous)'));
       let cols = wcols([8,30,10,12,14,14]);
-      let rows = [new TableRow({children:[headerCell('Sr',{width:cols[0]}),headerCell('Component',{width:cols[1]}),headerCell('Mark',{width:cols[2]}),headerCell('Freq',{width:cols[3]}),headerCell('Total',{width:cols[4]}),headerCell('Reduced',{width:cols[5]})]})];
-      editData.evaluationTheoryInternal.forEach(r => rows.push(new TableRow({children:[cell(r.sr,{width:cols[0],center:true}),cell(r.component,{width:cols[1],bold:/total|pass/i.test(r.component)}),cell(r.mark,{width:cols[2],center:true}),cell(r.frequency,{width:cols[3],center:true}),cell(r.totalMark,{width:cols[4],center:true}),cell(r.reducedMark,{width:cols[5],center:true})]})));
+      let rows = [new TableRow({children:[
+        headerCell('Sr No',{width:cols[0]}), headerCell('Type of Test',{width:cols[1]}), headerCell('Mark',{width:cols[2]}),
+        headerCell('Frequency',{width:cols[3]}), headerCell('Total Mark',{width:cols[4]}), headerCell('Reduced Mark',{width:cols[5]})
+      ]})];
+      editData.evaluationTheoryInternal.forEach(r => rows.push(new TableRow({children:[
+        cell(r.sr,{width:cols[0],center:true}), cell(r.component,{width:cols[1],bold:/total|pass/i.test(r.component)}),
+        cell(r.mark,{width:cols[2],center:true}), cell(r.frequency,{width:cols[3],center:true}),
+        cell(r.totalMark,{width:cols[4],center:true,bold:/total|pass/i.test(r.component)}), cell(r.reducedMark,{width:cols[5],center:true,bold:/total|pass/i.test(r.component)})
+      ]})));
       out.push(gridTable(cols,rows));
 
-      out.push(heading2Center('External Examination'));
+      out.push(heading2Center('Proposed External Examination ('+appConfig.degree+', Autonomous)'));
       cols = wcols([8,40,12,14,14]);
-      rows = [new TableRow({children:[headerCell('Sr',{width:cols[0]}),headerCell('Component',{width:cols[1]}),headerCell('Mark',{width:cols[2]}),headerCell('Freq',{width:cols[3]}),headerCell('Total',{width:cols[4]})]})];
-      editData.evaluationTheoryExternal.forEach(r => rows.push(new TableRow({children:[cell(r.sr,{width:cols[0],center:true}),cell(r.component,{width:cols[1],bold:/total|pass/i.test(r.component)}),cell(r.mark,{width:cols[2],center:true}),cell(r.frequency,{width:cols[3],center:true}),cell(r.totalMark,{width:cols[4],center:true})]})));
+      rows = [new TableRow({children:[
+        headerCell('Sr No',{width:cols[0]}), headerCell('Type of Test',{width:cols[1]}), headerCell('Mark',{width:cols[2]}),
+        headerCell('Frequency',{width:cols[3]}), headerCell('Total Mark',{width:cols[4]})
+      ]})];
+      editData.evaluationTheoryExternal.forEach(r => rows.push(new TableRow({children:[
+        cell(r.sr,{width:cols[0],center:true}), cell(r.component,{width:cols[1],bold:/total|pass/i.test(r.component)}),
+        cell(r.mark,{width:cols[2],center:true}), cell(r.frequency,{width:cols[3],center:true}),
+        cell(r.totalMark,{width:cols[4],center:true,bold:/total|pass/i.test(r.component)})
+      ]})));
       out.push(gridTable(cols,rows));
 
-      [['evaluationPractical','2. Practical Subjects:'],['evaluationSkill','3. Skill Courses:'],['evaluationMandatory','4. Mandatory Courses:']].forEach(([key,label])=>{
-        out.push(para(label,{bold:true,spaceBefore:100}));
+      [['evaluationPractical','2. Evaluation Process of Practical Subjects:'],
+       ['evaluationSkill','3. Evaluation Process of Skill Courses:'],
+       ['evaluationMandatory','4. Evaluation Process of Mandatory Courses:']].forEach(([key,label])=>{
+        out.push(para(label, { bold:true, size:SZ_BODY, spaceBefore:100 }));
         const c2 = wcols([30,12,28,30]);
-        const r2 = [new TableRow({children:[headerCell('Component',{width:c2[0]}),headerCell('Marks',{width:c2[1]}),headerCell('Frequency',{width:c2[2]}),headerCell('Assigned To',{width:c2[3]})]})];
-        editData[key].forEach(r => r2.push(new TableRow({children:[cell(r.component,{width:c2[0],bold:r.component==='Total'}),cell(r.marks,{width:c2[1],center:true}),cell(r.frequency,{width:c2[2]}),cell(r.assignedTo,{width:c2[3]})]})));
+        const r2 = [new TableRow({children:[
+          headerCell('Components',{width:c2[0]}), headerCell('Marks',{width:c2[1]}),
+          headerCell('Frequency',{width:c2[2]}), headerCell('Assigned To',{width:c2[3]})
+        ]})];
+        editData[key].forEach(r => r2.push(new TableRow({children:[
+          cell(r.component,{width:c2[0],bold:r.component==='Total'}), cell(r.marks,{width:c2[1],center:true,bold:r.component==='Total'}),
+          cell(r.frequency,{width:c2[2]}), cell(r.assignedTo,{width:c2[3]})
+        ]})));
         out.push(gridTable(c2,r2));
       });
       return out;
     }
 
-    // Subject section
-    function subjectChildren(s,type){
+    // ════════════════════════════════════════════════════════════════
+    // CONTENTS / TOC PAGE (per year — lists theory + practical)
+    // ════════════════════════════════════════════════════════════════
+    function contentsPage(yearLabel, theoryList, practicalList) {
+      const out = [heading1('Contents', { pageBreakBefore:true, underline:true })];
+      out.push(heading1Sub(yearLabel));
+      out.push(heading1Sub('Curriculum Structure'));
+
+      const cols = wcols([85, 15]);
+      const rows = [new TableRow({ children: [headerCell('Item',{width:cols[0],center:false}), headerCell('Page No',{width:cols[1]})] })];
+      rows.push(new TableRow({ children: [cell('Curriculum Structure',{width:cols[0]}), cell('—',{width:cols[1],center:true})] }));
+      rows.push(new TableRow({ children: [cell('Evaluation Process',{width:cols[0]}), cell('—',{width:cols[1],center:true})] }));
+
+      if (theoryList.length) {
+        rows.push(new TableRow({ children: [cell('Theory',{width:cols[0],bold:true}), cell('',{width:cols[1]})] }));
+        theoryList.forEach(s => rows.push(new TableRow({ children: [cell(s.title,{width:cols[0]}), cell('—',{width:cols[1],center:true})] })));
+      }
+      if (practicalList.length) {
+        rows.push(new TableRow({ children: [cell('Practical',{width:cols[0],bold:true}), cell('',{width:cols[1]})] }));
+        practicalList.forEach(s => rows.push(new TableRow({ children: [cell(s.title,{width:cols[0]}), cell('—',{width:cols[1],center:true})] })));
+      }
+      out.push(gridTable(cols, rows));
+      return out;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // SUBJECT DETAIL SECTION
+    // ════════════════════════════════════════════════════════════════
+    function subjectChildren(s, type) {
       const out = [];
-      out.push(new Paragraph({children:[new TextRun({text:s.title,bold:true,size:24,font:FONT})],alignment:AlignmentType.CENTER,spacing:{before:120,after:80}}));
+
+      // Subject title centered bold
+      out.push(new Paragraph({ children:[new TextRun({text:s.title,bold:true,size:SZ_SUBJECT_TITLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{before:120,after:80} }));
+
+      // Info table: Type | Code | Course Title | L-T-P | Credits | Marks
       let cols = wcols([9,17,38,10,10,10]);
-      out.push(gridTable(cols,[
-        new TableRow({children:[headerCell('Type',{width:cols[0]}),headerCell('Code',{width:cols[1]}),headerCell('Title',{width:cols[2]}),headerCell('L-T-P',{width:cols[3]}),headerCell('Cr',{width:cols[4]}),headerCell('Marks',{width:cols[5]})]}),
-        new TableRow({children:[cell(s.category,{width:cols[0],center:true}),cell(s.code,{width:cols[1],center:true}),cell(s.title,{width:cols[2],bold:true}),cell(s.ltp,{width:cols[3],center:true}),cell(s.credits,{width:cols[4],center:true}),cell(s.marks||'—',{width:cols[5],center:true})]})
+      out.push(gridTable(cols, [
+        new TableRow({children:[
+          headerCell('Type',{width:cols[0]}), headerCell('Code',{width:cols[1]}), headerCell('Course Title',{width:cols[2]}),
+          headerCell('L-T-P',{width:cols[3]}), headerCell('Credits',{width:cols[4]}), headerCell('Marks',{width:cols[5]})
+        ]}),
+        new TableRow({children:[
+          cell(s.category,{width:cols[0],center:true}), cell(s.code,{width:cols[1],center:true}),
+          cell(s.title,{width:cols[2],bold:true}), cell(s.ltp,{width:cols[3],center:true}),
+          cell(s.credits,{width:cols[4],center:true}), cell(s.marks||'—',{width:cols[5],center:true})
+        ]})
       ]));
       out.push(spacer());
 
-      if (s.objectives||s.prerequisites||s.pedagogy){
-        const lw=wcols([16,84])[0],vw=CONTENT_W-lw;
-        out.push(gridTable([lw,vw],[
-          new TableRow({children:[headerCell('Objectives',{width:lw}),cell(s.objectives||'—',{width:vw})]}),
-          new TableRow({children:[headerCell('Pre-Requisites',{width:lw}),cell(s.prerequisites||'—',{width:vw})]}),
-          new TableRow({children:[headerCell('Pedagogy',{width:lw}),cell(s.pedagogy||'—',{width:vw})]})
+      // Objectives / Pre-Requisites / Teaching Pedagogy
+      if (s.objectives || s.prerequisites || s.pedagogy) {
+        const lw = wcols([16,84])[0], vw = CONTENT_W - lw;
+        out.push(gridTable([lw,vw], [
+          new TableRow({children:[headerCell('Objectives',{width:lw,center:false}), cell(s.objectives||'—',{width:vw})]}),
+          new TableRow({children:[headerCell('Pre-Requisites',{width:lw,center:false}), cell(s.prerequisites||'—',{width:vw})]}),
+          new TableRow({children:[headerCell('Teaching Pedagogy',{width:lw,center:false}), cell(s.pedagogy||'—',{width:vw})]})
         ]));
         out.push(spacer());
       }
 
-      if (type==='theory'&&s.modules&&s.modules.length){
+      // Modules (theory)
+      if (type==='theory' && s.modules && s.modules.length) {
         out.push(heading2Center('Detailed Syllabus'));
-        const mc=wcols([10,78,12]);
-        const mr=[new TableRow({children:[headerCell('Module',{width:mc[0]}),headerCell('Topics',{width:mc[1]}),headerCell('Hours',{width:mc[2]})]})];
-        s.modules.forEach(m=>mr.push(new TableRow({children:[cell('M-'+m.no,{width:mc[0],center:true,bold:true}),cell(m.topics,{width:mc[1]}),cell(fmtHours(m.hours),{width:mc[2],center:true})]})));
-        if(s.totalHours)mr.push(new TableRow({children:[cell('Total',{width:mc[0]+mc[1],colSpan:2,bold:true}),cell(fmtHours(s.totalHours),{width:mc[2],center:true,bold:true})]}));
-        out.push(gridTable(mc,mr));
+        const mc = wcols([12,76,12]);
+        const mr = [new TableRow({children:[
+          headerCell('Module-#',{width:mc[0]}), headerCell('Topics',{width:mc[1]}), headerCell('Hours',{width:mc[2]})
+        ]})];
+        s.modules.forEach(m => mr.push(new TableRow({children:[
+          cell('Module-'+m.no, {width:mc[0],center:true,bold:true}), cell(m.topics, {width:mc[1]}),
+          cell(fmtHours(m.hours), {width:mc[2],center:true})
+        ]})));
+        if (s.totalHours) mr.push(new TableRow({children:[
+          cell('Total', {width:mc[0]+mc[1],colSpan:2,bold:true}), cell(fmtHours(s.totalHours), {width:mc[2],center:true,bold:true})
+        ]}));
+        out.push(gridTable(mc, mr));
         out.push(spacer());
       }
 
-      if (type==='practical'&&s.experiments&&s.experiments.length){
-        const ec=wcols([10,78,12]);
-        const er=[new TableRow({children:[headerCell('No.',{width:ec[0]}),headerCell('Experiment',{width:ec[1]}),headerCell('Hours',{width:ec[2]})]})];
-        s.experiments.forEach(e=>er.push(new TableRow({children:[cell(e.no,{width:ec[0],center:true}),cell(e.name,{width:ec[1]}),cell(e.hours||'',{width:ec[2],center:true})]})));
-        out.push(gridTable(ec,er));
+      // Experiments (practical)
+      if (type==='practical' && s.experiments && s.experiments.length) {
+        const ec = wcols([10,78,12]);
+        const er = [new TableRow({children:[
+          headerCell('Sl. No.',{width:ec[0]}), headerCell('List of Experiments',{width:ec[1]}), headerCell('Hours',{width:ec[2]})
+        ]})];
+        s.experiments.forEach(e => er.push(new TableRow({children:[
+          cell(e.no,{width:ec[0],center:true}), cell(e.name,{width:ec[1]}), cell(e.hours||'',{width:ec[2],center:true})
+        ]})));
+        out.push(gridTable(ec, er));
         out.push(spacer());
       }
 
-      function bookParas(label,prefix,books){
-        if(!books||!books.length)return[];
-        const items=[para(label+':',{bold:true,spaceBefore:80,spaceAfter:40})];
-        books.forEach((b,i)=>items.push(para(`${prefix}${i+1}. ${b}`,{spaceAfter:30})));
+      // Books
+      function bookParas(label, prefix, books) {
+        if (!books || !books.length) return [];
+        const items = [para(label+':', { bold:true, size:SZ_BODY, spaceBefore:80, spaceAfter:40 })];
+        books.forEach((b,i) => items.push(para(`${prefix}${i+1}. ${b}`, { size:SZ_BODY, spaceAfter:30 })));
         return items;
       }
       out.push(...bookParas('Text Books','T',s.textBooks));
       out.push(...bookParas('Reference Books','R',s.referenceBooks));
       out.push(...bookParas('Online Resources','',s.onlineResources));
 
-      if (s.courseOutcomes&&s.courseOutcomes.length){
-        out.push(para('Course Outcomes:',{bold:true,spaceBefore:80,spaceAfter:40}));
-        const cc=wcols([8,92]);
-        out.push(gridTable(cc,s.courseOutcomes.map(co=>new TableRow({children:[cell(co.co,{width:cc[0],center:true,bold:true}),cell(co.desc,{width:cc[1]})]}))));
+      // Course Outcomes
+      if (s.courseOutcomes && s.courseOutcomes.length) {
+        out.push(para('Course Outcomes: At the end of this course, the students will be able to:', { bold:true, size:SZ_BODY, spaceBefore:80, spaceAfter:40 }));
+        const cc = wcols([8,92]);
+        out.push(gridTable(cc, s.courseOutcomes.map(co => new TableRow({children:[
+          cell(co.co, {width:cc[0],center:true,bold:true}), cell(co.desc, {width:cc[1]})
+        ]}))));
       }
       out.push(spacer());
       return out;
     }
 
-    // Assemble
-    const incCover=document.getElementById('incCover').checked;
-    const incPO=document.getElementById('incPO').checked;
-    const incCurriculum=document.getElementById('incCurriculum').checked;
-    const incEvaluation=document.getElementById('incEvaluation').checked;
-    const incTheory=document.getElementById('incTheory').checked;
-    const incPractical=document.getElementById('incPractical').checked;
+    // ════════════════════════════════════════════════════════════════
+    // RIGHT-ALIGNED FOOTER (matches reference: "Page X of Y" right)
+    // ════════════════════════════════════════════════════════════════
+    function makeFooter() {
+      return new Footer({ children: [new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({ text: 'Page ', size: SZ_FOOTER, font: FONT }),
+          new TextRun({ children: [PageNumber.CURRENT], size: SZ_FOOTER, font: FONT }),
+          new TextRun({ text: ' of ', size: SZ_FOOTER, font: FONT }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: SZ_FOOTER, font: FONT })
+        ]
+      })] });
+    }
 
+    // ════════════════════════════════════════════════════════════════
+    // ASSEMBLE DOCUMENT
+    // ════════════════════════════════════════════════════════════════
     const children = [];
+
     if (incCover) children.push(...coverPageChildren());
 
-    if (incCurriculum) {
+    if (incCurriculum) children.push(...curriculumPages());
+
+    if (incPO) {
+      children.push(...programOutcomesChildren());
+      children.push(...glossaryChildren());
+    }
+
+    if (incEvaluation) children.push(...evaluationChildren());
+
+    // Contents + Subject details per year
+    if (incTheory || incPractical) {
       const semsPerYear = appConfig.semsPerYear;
       const totalYears = appConfig.duration;
+
       for (let yr = 1; yr <= totalYears; yr++) {
         const firstSem = (yr-1)*semsPerYear + 1;
-        const isFirst = yr===1 && !incCover;
-        children.push(heading1('Curriculum Structure',{pageBreakBefore:!isFirst,underline:true}));
-        children.push(heading1Sub(appConfig.collegeName));
-        children.push(heading1Sub(`${getProgramLabel()} – ${appConfig.batch||''}`));
-        children.push(heading1Sub(`${ORDINALS[yr]||yr} Year`));
+        const yearLabel = `${ORDINALS[yr]||yr} Year (${ORDINAL_SHORT[yr]||yr} Year)`;
+
+        // Collect all subjects for this year
+        let theoryAll = [], practicalAll = [];
         for (let s = 0; s < semsPerYear; s++) {
           const semNum = firstSem + s;
           if (semNum > appConfig.totalSems) break;
           const sem = editData.semesters[semNum];
           if (!sem) continue;
-          children.push(heading2Center(sem.label.toUpperCase()));
-          children.push(...semCurriculumChildren(sem));
+          if (incTheory) theoryAll.push(...sem.theory);
+          if (incPractical) practicalAll.push(...sem.practical);
+        }
+
+        if (theoryAll.length || practicalAll.length) {
+          // Contents page for this year
+          children.push(...contentsPage(yearLabel, incTheory?theoryAll:[], incPractical?practicalAll:[]));
+
+          // Subject detail pages
+          for (let s = 0; s < semsPerYear; s++) {
+            const semNum = firstSem + s;
+            if (semNum > appConfig.totalSems) break;
+            const sem = editData.semesters[semNum];
+            if (!sem) continue;
+            if (incTheory) sem.theory.forEach(subj => children.push(...subjectChildren(subj, 'theory')));
+            if (incPractical) sem.practical.forEach(subj => children.push(...subjectChildren(subj, 'practical')));
+          }
         }
       }
     }
 
-    if (incPO) children.push(...programOutcomesChildren());
-    if (incEvaluation) children.push(...evaluationChildren());
-
-    if (incTheory||incPractical) {
-      for (let i = 1; i <= appConfig.totalSems; i++) {
-        const sem = editData.semesters[i];
-        if (!sem) continue;
-        if (incTheory) sem.theory.forEach(s => children.push(...subjectChildren(s,'theory')));
-        if (incPractical) sem.practical.forEach(s => children.push(...subjectChildren(s,'practical')));
-      }
-    }
-
-    setStatus('Packaging DOCX…','info');
+    // ════════════════════════════════════════════════════════════════
+    // BUILD & DOWNLOAD
+    // ════════════════════════════════════════════════════════════════
+    setStatus('Packaging DOCX…', 'info');
     const doc = new Document({
-      styles:{default:{document:{run:{font:FONT,size:24}}}},
-      sections:[{properties:{page:{size:{width:PAGE_W,height:PAGE_H},margin:{top:MARGIN_TOP,right:MARGIN_RIGHT,bottom:MARGIN_BOTTOM,left:MARGIN_LEFT}}},
-        footers:{default:new Footer({children:[new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:'Page ',size:18,font:FONT}),new TextRun({children:[PageNumber.CURRENT],size:18,font:FONT}),new TextRun({text:' of ',size:18,font:FONT}),new TextRun({children:[PageNumber.TOTAL_PAGES],size:18,font:FONT})]})]})}
-      ,children}]
+      styles: { default: { document: { run: { font: FONT, size: SZ_BODY } } } },
+      sections: [{
+        properties: {
+          page: {
+            size: { width: PAGE_W, height: PAGE_H },
+            margin: { top: MARGIN_TOP, right: MARGIN_RIGHT, bottom: MARGIN_BOTTOM, left: MARGIN_LEFT }
+          }
+        },
+        footers: { default: makeFooter() },
+        children
+      }]
     });
 
     const base64 = await Packer.toBase64String(doc);
     const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -21404,10 +21739,10 @@ async function downloadDocx() {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    setStatus('Download complete!','ok');
+    setStatus('Download complete!', 'ok');
   } catch(err) {
     console.error('DOCX Error:', err);
-    setStatus('Error: '+err.message,'err');
+    setStatus('Error: ' + err.message, 'err');
   } finally {
     btn.disabled = false;
   }
