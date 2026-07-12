@@ -20773,6 +20773,7 @@ function buildSubjectCard(s, si, type) {
 }
 
 function esc(s) { return (s||'').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function nl2br(s) { return (s||'').replace(/\r\n|\r|\n/g,'<br>'); }
 
 function buildModuleEditor(s, si, type) {
   let html = `<div class="text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-2 mt-3">Modules</div><div class="space-y-1.5" id="mod_${type}_${si}">`;
@@ -21100,7 +21101,7 @@ function subjectDetailHtml(s, type) {
   html += `<tr><td class="c">${s.category}</td><td class="c">${s.code}</td><td><strong>${s.title}</strong></td><td class="c">${s.ltp}</td><td class="c">${s.credits}</td><td class="c">${s.marks||'—'}</td></tr></table>`;
 
   if (s.objectives||s.prerequisites||s.pedagogy) {
-    html += `<table class="doc-table"><tr><th>Objectives</th><td>${s.objectives||'—'}</td></tr><tr><th>Pre-Requisites</th><td>${s.prerequisites||'—'}</td></tr><tr><th>Teaching Pedagogy</th><td>${s.pedagogy||'—'}</td></tr></table>`;
+    html += `<table class="doc-table"><tr><th>Objectives</th><td>${nl2br(s.objectives)||'—'}</td></tr><tr><th>Pre-Requisites</th><td>${nl2br(s.prerequisites)||'—'}</td></tr><tr><th>Teaching Pedagogy</th><td>${nl2br(s.pedagogy)||'—'}</td></tr></table>`;
   }
 
   if (type==='theory' && s.modules && s.modules.length) {
@@ -21116,8 +21117,14 @@ function subjectDetailHtml(s, type) {
     html += `</tbody></table>`;
   }
 
-  if (s.textBooks&&s.textBooks.length) { html += `<p class="doc-p"><strong>Text Books:</strong></p>`; s.textBooks.forEach((b,i) => html += `<p class="doc-p" style="margin-left:12px">T${i+1}. ${b}</p>`); }
-  if (s.referenceBooks&&s.referenceBooks.length) { html += `<p class="doc-p"><strong>Reference Books:</strong></p>`; s.referenceBooks.forEach((b,i) => html += `<p class="doc-p" style="margin-left:12px">R${i+1}. ${b}</p>`); }
+  function bookTableHtml(label, prefix, books) {
+    if (!books || !books.length) return '';
+    let h = `<p class="doc-p"><strong>${label}:</strong></p><table class="doc-table"><thead><tr><th style="width:10%">Sl. No.</th><th>${label}</th></tr></thead><tbody>`;
+    books.forEach((b,i) => h += `<tr><td class="c"><strong>${prefix}${i+1}</strong></td><td>${nl2br(b)}</td></tr>`);
+    return h + '</tbody></table>';
+  }
+  html += bookTableHtml('Text Books','T',s.textBooks);
+  html += bookTableHtml('Reference Books','R',s.referenceBooks);
   if (s.onlineResources&&s.onlineResources.length) { html += `<p class="doc-p"><strong>Online Resources:</strong></p>`; s.onlineResources.forEach((b,i) => html += `<p class="doc-p" style="margin-left:12px">${i+1}. ${b}</p>`); }
   if (s.courseOutcomes&&s.courseOutcomes.length) {
     html += `<p class="doc-p"><strong>Course Outcomes:</strong></p><table class="doc-table"><tbody>`;
@@ -21219,6 +21226,8 @@ async function downloadDocx() {
     // ── Border/shading helpers ──
     function solid(size) { return { style: BorderStyle.SINGLE, size, color: '000000' }; }
     function allBorders(size=4) { return { top:solid(size), bottom:solid(size), left:solid(size), right:solid(size) }; }
+    function gridBorders(size=4) { return { top:solid(size), bottom:solid(size), left:solid(size), right:solid(size), insideV:solid(size), insideH:solid(size) }; }
+    function noBorders() { return { top:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}, bottom:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}, left:{style:BorderStyle.NONE,size:0,color:'FFFFFF'}, right:{style:BorderStyle.NONE,size:0,color:'FFFFFF'} }; }
     function noShading() { return { type: ShadingType.CLEAR, fill: 'FFFFFF', color: 'auto' }; }
     function wcols(weights, total=CONTENT_W) {
       const sum = weights.reduce((a,b)=>a+b,0);
@@ -21228,9 +21237,18 @@ async function downloadDocx() {
     }
 
     // ── Paragraph helpers ──
+    // Splits on real newlines and inserts explicit line breaks — a raw "\n" inside
+    // a run's text is invalid in OOXML and Word renders it as stray whitespace/tab.
+    function multilineRuns(text, opts={}) {
+      const str = String(text===0?0:(text||''));
+      return str.split(/\r\n|\r|\n/).map((line,i) => new TextRun({
+        text: line, bold: opts.bold||false, italics: opts.italics||false, size: opts.size, font: FONT, break: i>0 ? 1 : 0
+      }));
+    }
+
     function para(text, opts={}) {
       const sz = opts.size || SZ_BODY;
-      const runs = Array.isArray(text) ? text : [new TextRun({ text: String(text||''), bold: opts.bold||false, italics: opts.italics||false, size: sz, font: FONT })];
+      const runs = Array.isArray(text) ? text : multilineRuns(text, { bold: opts.bold, italics: opts.italics, size: sz });
       return new Paragraph({
         children: runs,
         alignment: opts.center ? AlignmentType.CENTER : (opts.right ? AlignmentType.RIGHT : AlignmentType.LEFT),
@@ -21263,7 +21281,7 @@ async function downloadDocx() {
       const sz = opts.size || SZ_TABLE;
       return new TableCell({
         children: [new Paragraph({
-          children: [new TextRun({ text: String(text===0?0:(text||'')), bold: opts.bold||false, size: sz, font: FONT })],
+          children: multilineRuns(text, { bold: opts.bold, size: sz }),
           alignment: opts.center ? AlignmentType.CENTER : AlignmentType.LEFT,
           spacing: { before: 30, after: 30 }
         })],
@@ -21279,7 +21297,7 @@ async function downloadDocx() {
       const sz = opts.size || SZ_TABLE;
       return new TableCell({
         children: [new Paragraph({
-          children: [new TextRun({ text: String(text||''), bold: true, size: sz, font: FONT })],
+          children: multilineRuns(text, { bold: true, size: sz }),
           alignment: opts.center !== false ? AlignmentType.CENTER : AlignmentType.LEFT,
           spacing: { before: 30, after: 30 }
         })],
@@ -21292,7 +21310,11 @@ async function downloadDocx() {
     }
 
     function gridTable(cols, rows) {
-      return new Table({ rows, width: { size: CONTENT_W, type: WidthType.DXA }, borders: allBorders(4) });
+      return new Table({
+        rows, columnWidths: cols,
+        width: { size: cols.reduce((a,b)=>a+b,0), type: WidthType.DXA },
+        borders: gridBorders(4)
+      });
     }
 
     const progLabel = getProgramLabel();
@@ -21334,18 +21356,9 @@ async function downloadDocx() {
     // ════════════════════════════════════════════════════════════════
     // CURRICULUM — two-column layout (reference uses 1×2 table per year)
     // ════════════════════════════════════════════════════════════════
-    function buildCurriculumInnerParagraphs(sem) {
-      // Build paragraphs for one semester column
-      const paras = [];
-      paras.push(new Paragraph({ children:[new TextRun({text:sem.label.toUpperCase(),bold:true,size:SZ_CURR_TABLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{after:40} }));
-
-      // Header row
-      const hdr = new Paragraph({ children:[
-        new TextRun({text:'Sl. No.',bold:true,size:SZ_TABLE,font:FONT}),
-      ], spacing:{after:20} });
-
+    function buildCurriculumInnerParagraphs(sem, totalWidth, cellWidth, cellMargins) {
       // Build a sub-table inside the cell for the curriculum
-      const cols = wcols([7,9,15,39,12,8], Math.floor(CONTENT_W/2) - 160);
+      const cols = wcols([7,9,15,39,12,8], totalWidth);
       const rows = [];
       rows.push(new TableRow({children:[
         headerCell('Sl.\nNo.',{width:cols[0],size:SZ_TABLE}), headerCell('Category',{width:cols[1],size:SZ_TABLE}),
@@ -21379,17 +21392,16 @@ async function downloadDocx() {
         ]}));
       }
 
-      const halfW = Math.floor(CONTENT_W/2) - 80;
       return new TableCell({
         children: [
           new Paragraph({ children:[new TextRun({text:sem.label.toUpperCase(),bold:true,size:SZ_CURR_TABLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{after:40} }),
-          new Table({ rows, width:{size:halfW,type:WidthType.DXA}, borders:allBorders(4) }),
+          gridTable(cols, rows),
           ...(sem.note ? [new Paragraph({ children:[new TextRun({text:sem.note,bold:true,size:SZ_TABLE,font:FONT})], alignment:AlignmentType.CENTER, spacing:{before:60,after:40} })] : [])
         ],
-        width: { size: Math.floor(CONTENT_W/2), type: WidthType.DXA },
+        width: { size: cellWidth, type: WidthType.DXA },
         shading: noShading(),
-        borders: allBorders(4),
-        margins: { top: 60, bottom: 60, left: 80, right: 80 }
+        borders: noBorders(),
+        margins: Object.assign({ top: 60, bottom: 60 }, cellMargins)
       });
     }
 
@@ -21397,6 +21409,10 @@ async function downloadDocx() {
       const ch = [];
       const semsPerYear = appConfig.semsPerYear;
       const totalYears = appConfig.duration;
+      // ── Matches v4's exact two-column spacing model ──
+      const GAP = 200, PAD = 60;
+      const half = Math.floor((CONTENT_W - GAP) / 2);
+      const nestedW = half - PAD * 2;
 
       for (let yr = 1; yr <= totalYears; yr++) {
         const firstSem = (yr-1)*semsPerYear + 1;
@@ -21406,30 +21422,35 @@ async function downloadDocx() {
         const yrLabel = (ORDINALS[yr]||yr).toUpperCase() + ' YEAR';
         ch.push(heading1Sub(`${appConfig.degree.toUpperCase()} – ${(appConfig.branch||'').toUpperCase()}, SYLLABUS-${appConfig.batch||''}, ${yrLabel}`));
 
-        // Build side-by-side table: 2 semesters per row
-        const semCells = [];
+        // Collect the semesters that belong to this year
+        const sems = [];
         for (let s = 0; s < semsPerYear; s++) {
           const semNum = firstSem + s;
           if (semNum > appConfig.totalSems) break;
           const sem = editData.semesters[semNum];
-          if (!sem) continue;
-          semCells.push(buildCurriculumInnerParagraphs(sem));
+          if (sem) sems.push(sem);
         }
 
-        if (semCells.length === 2) {
+        if (sems.length === 2) {
           // Two semesters side by side
+          const cellA = buildCurriculumInnerParagraphs(sems[0], nestedW, half, { left:PAD, right:PAD });
+          const cellB = buildCurriculumInnerParagraphs(sems[1], nestedW, CONTENT_W-half, { left:PAD, right:PAD });
           ch.push(new Table({
-            rows: [new TableRow({ children: semCells })],
+            rows: [new TableRow({ children: [cellA, cellB] })],
             width: { size: CONTENT_W, type: WidthType.DXA },
-            borders: allBorders(4)
+            columnWidths: [half, CONTENT_W-half],
+            borders: noBorders()
           }));
         } else {
           // Single semester or more than 2 — stack vertically
-          semCells.forEach(sc => {
+          const singleW = CONTENT_W - PAD*2;
+          sems.forEach(sem => {
+            const sc = buildCurriculumInnerParagraphs(sem, singleW, CONTENT_W, { left:PAD, right:PAD });
             ch.push(new Table({
               rows: [new TableRow({ children: [sc] })],
               width: { size: CONTENT_W, type: WidthType.DXA },
-              borders: allBorders(4)
+              columnWidths: [CONTENT_W],
+              borders: noBorders()
             }));
             ch.push(spacer());
           });
@@ -21618,15 +21639,24 @@ async function downloadDocx() {
         out.push(spacer());
       }
 
-      // Books
+      // Books — Text/Reference Books render as tables; Online Resources stays a plain list
+      function bookTable(label, prefix, books) {
+        if (!books || !books.length) return [];
+        const bc = wcols([10,90]);
+        const rows = [new TableRow({children:[headerCell('Sl. No.',{width:bc[0]}), headerCell(label,{width:bc[1],center:false})]})];
+        books.forEach((b,i) => rows.push(new TableRow({children:[
+          cell(prefix+(i+1), {width:bc[0],center:true,bold:true}), cell(b, {width:bc[1]})
+        ]})));
+        return [para(label+':', { bold:true, size:SZ_BODY, spaceBefore:80, spaceAfter:40 }), gridTable(bc, rows), spacer()];
+      }
       function bookParas(label, prefix, books) {
         if (!books || !books.length) return [];
         const items = [para(label+':', { bold:true, size:SZ_BODY, spaceBefore:80, spaceAfter:40 })];
         books.forEach((b,i) => items.push(para(`${prefix}${i+1}. ${b}`, { size:SZ_BODY, spaceAfter:30 })));
         return items;
       }
-      out.push(...bookParas('Text Books','T',s.textBooks));
-      out.push(...bookParas('Reference Books','R',s.referenceBooks));
+      out.push(...bookTable('Text Books','T',s.textBooks));
+      out.push(...bookTable('Reference Books','R',s.referenceBooks));
       out.push(...bookParas('Online Resources','',s.onlineResources));
 
       // Course Outcomes
